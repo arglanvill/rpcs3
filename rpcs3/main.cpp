@@ -10,6 +10,8 @@
 #include <QTextDocument>
 #include <QStyleFactory>
 
+#include <filesystem>
+
 #include "rpcs3qt/gui_application.h"
 
 #include "headless_application.h"
@@ -32,7 +34,10 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #include "rpcs3_version.h"
 
-inline std::string sstr(const QString& _in) { return _in.toStdString(); }
+inline std::string sstr(const QString& _in)
+{
+	return _in.toStdString();
+}
 
 template <typename... Args>
 inline auto tr(Args&&... args)
@@ -56,14 +61,13 @@ static semaphore<> s_qt_mutex{};
 	if (!s_qt_init.try_lock())
 	{
 		s_init.lock();
-		static int argc = 1;
-		static char arg1[] = {"ERROR"};
+		static int argc     = 1;
+		static char arg1[]  = {"ERROR"};
 		static char* argv[] = {arg1};
 		static QApplication app0{argc, argv};
 	}
 
-	auto show_report = [](const std::string& text)
-	{
+	auto show_report = [](const std::string& text) {
 		QMessageBox msg;
 		msg.setWindowTitle(tr("RPCS3: Fatal Error"));
 		msg.setIcon(QMessageBox::Critical);
@@ -76,9 +80,9 @@ static semaphore<> s_qt_mutex{};
 				%3<br>
 			</p>
 			)")
-			.arg(Qt::convertFromPlainText(QString::fromStdString(text)))
-			.arg(tr("HOW TO REPORT ERRORS:"))
-			.arg(tr("Please, don't send incorrect reports. Thanks for understanding.")));
+		                .arg(Qt::convertFromPlainText(QString::fromStdString(text)))
+		                .arg(tr("HOW TO REPORT ERRORS:"))
+		                .arg(tr("Please, don't send incorrect reports. Thanks for understanding.")));
 		msg.layout()->setSizeConstraint(QLayout::SetFixedSize);
 		msg.exec();
 	};
@@ -87,7 +91,9 @@ static semaphore<> s_qt_mutex{};
 	// Cocoa access is not allowed outside of the main thread
 	if (!pthread_main_np())
 	{
-		dispatch_sync(dispatch_get_main_queue(), ^ { show_report(text); });
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			 show_report(text);
+		});
 	}
 	else
 #endif
@@ -98,12 +104,13 @@ static semaphore<> s_qt_mutex{};
 	std::abort();
 }
 
-const char* arg_headless   = "headless";
-const char* arg_no_gui     = "no-gui";
-const char* arg_high_dpi   = "hidpi";
-const char* arg_styles     = "styles";
-const char* arg_style      = "style";
-const char* arg_stylesheet = "stylesheet";
+const char* arg_headless    = "headless";
+const char* arg_no_gui      = "no-gui";
+const char* arg_high_dpi    = "hidpi";
+const char* arg_styles      = "styles";
+const char* arg_style       = "style";
+const char* arg_stylesheet  = "stylesheet";
+const char* arg_install_pkg = "install-pkg";
 
 int find_arg(std::string arg, int& argc, char* argv[])
 {
@@ -124,10 +131,10 @@ QCoreApplication* createApplication(int& argc, char* argv[])
 	const auto i_hdpi = find_arg(arg_high_dpi, argc, argv);
 	if (i_hdpi)
 	{
-		const std::string cmp_str = "0";
-		const auto i_hdpi_2 = (argc > (i_hdpi + 1)) ? (i_hdpi + 1) : 0;
+		const std::string cmp_str   = "0";
+		const auto i_hdpi_2         = (argc > (i_hdpi + 1)) ? (i_hdpi + 1) : 0;
 		const auto high_dpi_setting = (i_hdpi_2 && !strcmp(cmp_str.c_str(), argv[i_hdpi_2])) ? "0" : "1";
-		
+
 		// Set QT_AUTO_SCREEN_SCALE_FACTOR from environment. Defaults to cli argument, which defaults to 1.
 		use_high_dpi = "1" == qEnvironmentVariable("QT_AUTO_SCREEN_SCALE_FACTOR", high_dpi_setting);
 	}
@@ -149,7 +156,7 @@ int main(int argc, char** argv)
 	if (::setrlimit(RLIMIT_NOFILE, &rlim) != 0)
 		std::fprintf(stderr, "Failed to set max open file limit (4096).");
 	// Work around crash on startup on KDE: https://bugs.kde.org/show_bug.cgi?id=401637
-	setenv( "KDE_DEBUG", "1", 0 );
+	setenv("KDE_DEBUG", "1", 0);
 #endif
 
 	s_init.unlock();
@@ -178,22 +185,47 @@ int main(int argc, char** argv)
 	parser.addOption(QCommandLineOption(arg_styles, "Lists the available styles."));
 	parser.addOption(QCommandLineOption(arg_style, "Loads a custom style.", "style", ""));
 	parser.addOption(QCommandLineOption(arg_stylesheet, "Loads a custom stylesheet.", "path", ""));
+	parser.addOption(QCommandLineOption(arg_install_pkg, "Installs a .pkg file.", "path", ""));
 	parser.process(app->arguments());
 
 	// Don't start up the full rpcs3 gui if we just want the version or help.
 	if (parser.isSet(versionOption) || parser.isSet(helpOption))
 		return 0;
 
-	if (parser.isSet(arg_styles))
+	if (parser.isSet(arg_styles) || parser.isSet(arg_install_pkg))
 	{
 #ifdef _WIN32
 		if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole())
 			const auto con_out = freopen("CONOUT$", "w", stdout);
 #endif
+	}
+
+	if (parser.isSet(arg_styles))
+	{
 		for (const auto& style : QStyleFactory::keys())
 			std::cout << "\n" << style.toStdString();
 
 		return 0;
+	}
+
+	if (parser.isSet(arg_install_pkg))
+	{
+		std::string pkg = parser.value(arg_install_pkg).toStdString();
+		if (std::filesystem::exists(pkg))
+		{
+			std::cout << "Installing " << pkg << "...";
+			int result = !Emu.InstallPkg(pkg);
+			if (result == 0)
+				std::cout << "succeeded.";
+			else
+				std::cout << "failed";
+			return result;
+		}
+		else
+		{
+			std::cout << "Error: " << pkg << " not found.";
+			return 1;
+		}
 	}
 
 	if (auto gui_app = qobject_cast<gui_application*>(app.data()))
@@ -240,8 +272,7 @@ int main(int argc, char** argv)
 		}
 
 		// Ugly workaround
-		QTimer::singleShot(2, [path = sstr(QFileInfo(args.at(0)).canonicalFilePath()), argv = std::move(argv)]() mutable
-		{
+		QTimer::singleShot(2, [path = sstr(QFileInfo(args.at(0)).canonicalFilePath()), argv = std::move(argv)]() mutable {
 			Emu.argv = std::move(argv);
 			Emu.SetForceBoot(true);
 			Emu.BootGame(path, "", true);
