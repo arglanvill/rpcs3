@@ -11,7 +11,6 @@
 #include <QStyleFactory>
 
 #include <filesystem>
-#include "../Crypto/unpkg.h"
 
 #include "rpcs3qt/gui_application.h"
 
