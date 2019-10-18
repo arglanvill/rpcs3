@@ -11,6 +11,7 @@
 #include <QStyleFactory>
 
 #include <filesystem>
+#include "../Crypto/unpkg.h"
 
 #include "rpcs3qt/gui_application.h"
 
@@ -214,16 +215,18 @@ int main(int argc, char** argv)
 		if (std::filesystem::exists(pkg))
 		{
 			std::cout << "Installing " << pkg << "...";
-			int result = !Emu.InstallPkg(pkg);
+			// Must pass absolute path to installer or it will fail to open the file
+			std::string absolute_pkg = std::filesystem::absolute(pkg).string();
+			int result = !Emu.InstallPkg(absolute_pkg);
 			if (result == 0)
-				std::cout << "succeeded.";
+				std::cout << "succeeded." << std::endl;
 			else
-				std::cout << "failed";
+				std::cout << "failed" << std::endl;
 			return result;
 		}
 		else
 		{
-			std::cout << "Error: " << pkg << " not found.";
+			std::cout << "Error: " << pkg << " not found." << std::endl;
 			return 1;
 		}
 	}
